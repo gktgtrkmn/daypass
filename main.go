@@ -7,29 +7,34 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"time"
 )
 
 const (
-	StepSeconds = 86400
-	DigitLength = 6
+	DayInSeconds       = 86400
+	DefaultDigitLength = 6
+	TimezoneLocation   = "Europe/Istanbul"
 )
 
-func generateTOTPpass(secret string) (string, time.Duration, error) {
+func generateDailyCode(secret string) (string, time.Duration, error) {
 	secret = strings.ToUpper(strings.ReplaceAll(secret, " ", ""))
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secret)
 	if err != nil {
 		return "", 0, fmt.Errorf("invalid base32 secret: %v", err)
 	}
 
-	loc, _ := time.LoadLocation("Europe/Istanbul")
+	loc, err := time.LoadLocation(TimezoneLocation)
+	if err != nil {
+		log.Fatalf("Timezone error: %v", err)
+	}
 	now := time.Now().In(loc)
 
 	_, offset := now.Zone()
 	shiftedNow := now.Unix() + int64(offset)
-	counter := shiftedNow / StepSeconds // wont expire in a day
+	counter := shiftedNow / DayInSeconds // wont expire in a day
 
 	nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, loc)
 	remaining := time.Until(nextMidnight)
@@ -48,9 +53,10 @@ func generateTOTPpass(secret string) (string, time.Duration, error) {
 		(int(sum[hmacOffset+2])&0xff)<<8 |
 		(int(sum[hmacOffset+3]) & 0xff)
 
-	otp := binaryCode % 1000000
+	modulo := int(math.Pow10(DefaultDigitLength))
+	otp := binaryCode % modulo
 
-	return fmt.Sprintf("%06d", otp), remaining, nil
+	return fmt.Sprintf("%0*d", DefaultDigitLength, otp), remaining, nil
 }
 
 func main() {
@@ -59,11 +65,11 @@ func main() {
 		log.Fatal("Error: SECRET environment variable is not set")
 	}
 
-	otp, remaining, err := generateTOTPpass(secret)
+	code, remaining, err := generateDailyCode(secret)
 	if err != nil {
 		log.Fatalf("Error generating OTP: %v", err)
 	}
 
-	fmt.Printf("Your code: %s\n", otp)
+	fmt.Printf("Your code: %s\n", code)
 	fmt.Printf("Valid for: %s\n", remaining.Round(time.Second))
 }
